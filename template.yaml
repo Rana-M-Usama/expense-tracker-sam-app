@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  sam-tracker-app
+
+  Sample SAM Template for sam-tracker-app
+
+Globals:
+  Function:
+    Timeout: 3
+    Tracing: Active
+    LoggingConfig:
+      LogFormat: JSON
+
+Resources:
+  AddExpenseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: expense/
+      Handler: app.addExpense
+      Runtime: nodejs16.x
+      Architectures:
+        - x86_64
+      Events:
+        Expense:
+          Type: Api
+          Properties:
+            Path: /addExpense
+            Method: post
+      
+
+  GetExpenseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: expense/
+      Handler: app.getExpense
+      Runtime: nodejs16.x
+      Architectures:
+        - x86_64
+      Events:
+        DownloadExpense:
+          Type: Api
+          Properties:
+            Path: /downloadExpense
+            Method: get
+     
+
+  Auth:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          title: 'API Gateway'
+        schemes:
+          - 'https'
+        paths: {}
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt MyUserPool.Arn
+            Scope: 'openid'
+
+  ExpenseApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Auth:
+        Authorizers:
+          MyCognitoAuthorizer:
+            AuthorizationType: COGNITO_USER_POOLS
+            ProviderARNs: 
+              - !GetAtt MyUserPool.Arn
+        ApiKeyRequired: true
+
+  MyUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: MyUserPool
+
+  MyUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref MyUserPool
+      ClientName: MyUserPoolClient
+
+  ExpenseTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ExpenseTable
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  CognitoApiGatewayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt AddExpenseFunction.Arn
+      Principal: apigateway.amazonaws.com
+
+  ApiGatewayInvokePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ApiGatewayInvokePolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt AddExpenseFunction.Arn
+      Roles:
+        - !GetAtt ApiGatewayRole.Arn
+
+  ApiGatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ApiGatewayInvokePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt AddExpenseFunction.Arn
+
+Outputs:
+  ExpenseApi:
+    Description: API Gateway endpoint URL for Add Expense and Download Expense functions
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+
+  ExpenseFunction:
+    Description: Add Expense Lambda Function ARN
+    Value: !GetAtt AddExpenseFunction.Arn
+
+  GetExpenseFunction:
+    Description: Download Expense Lambda Function ARN
+    Value: !GetAtt GetExpenseFunction.Arn
+
+  ExpenseTable:
+    Description: DynamoDB Table for storing expenses
+    Value: !Ref ExpenseTable
+
+  CognitoUserPoolId:
+    Description: Cognito User Pool Id
+    Value: !Ref MyUserPool
+
+  CognitoUserPoolClientId:
+    Description: Cognito User Pool Client
